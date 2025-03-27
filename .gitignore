@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+packages.Rmd
+/figures
+/data/preprocessing/
+/data/parameter_tests/
+/sandpit

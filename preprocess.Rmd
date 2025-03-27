@@ -1,0 +1,431 @@
+---
+title: "Pupil preprocessing - data from one eye"
+author: "Rich"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: united
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is the pupil preprocessing file when you have data from one eye.
+
+You can preprocess and plot the data for a bunch of trials and participants and visualise all of the steps.
+
+You can also run some parameter tests, which vary parameter values (such as the amount and type of smoothing) and take a look at the impact on preprocessing. 
+The purpose of parameter tests would be to fine-tine preprocessing to establish the appropriate settings for your data.
+
+Once you are happy with the chosen parameter settings, you can implement the steps in once efficient process to all trials and across all participants.
+
+# 1. load packages and custom functions plus adjust settings #
+
+## packages ##
+
+```{r load-pkg, results=F, message=F, warning=F}
+pkg <- c("pupillometry", "tidyverse", "here", "patchwork", "future", "RColorBrewer",
+         "parallel", "gazer", "data.table") 
+
+lapply(pkg, library, character.only = TRUE)
+```
+
+## custom functions ##
+
+```{r functions}
+source(here("custom_functions", "preprocess.r"))
+source(here("custom_functions", "parameter_tests.r"))  
+source(here("custom_functions", "settings.r"))
+```
+
+## check multicore settings ##
+
+```{r settings}
+plan(multicore)
+message(paste("Supporting multicore:", supportsMulticore()))
+message(paste("Available cores:", detectCores()))
+```
+
+# 2. read in the data #
+
+## take a quick look at the simulated data ##
+
+```{r plot-sim-data, echo=F, fig.cap = "simulated pupil data for one eye across 3 trials and 3 participants"}
+knitr::include_graphics("figures/sim_pupil_data.png")
+```
+
+## notes on the pupil_read() function ##
+
+Somewhat surprisingly maybe, the fiddliest part of preprocessing is reading in the initial raw data.
+Using the pupillometry package, we use the [pupil_read()](https://dr-jt.github.io/pupillometry/reference/pupil_read.html) function.
+This function has a lot of arguments.
+Please take a look to familiarise yourself with them, as I will only give a brief overview here.
+
+You can set the "eye_tracker" argument to automate the pupil_read function by setting expectations for how the data should be structured, give the type of eye tracker used.
+I won't use this approach here though.
+Instead, I'll set the eye_tracker to "", and then it will just read in any data.
+
+And the pupil_read() function expects certain naming conventions.
+For example, if you pupil column is called "pupil" in the raw data and it is measured in mm, then it will need to be renamed as pupil.mm using the pupil_read() function. 
+See the example below.
+
+There also needs to be a "message_event" column that labels when events occur, such as fixation or target (or whatever is relevant for your experiment). 
+If you do not have a message column in your raw data, then it should be easy enough to make one, given that this information is probably crucial for your experiment and analyses.
+
+Finally, during the reading in process, the function changes column names and uses the "message_event" info to create other columns.
+This is expected and subsequent preprocessing functions rely on this data structure and column naming conventions.
+
+## read data and add required columns ##
+
+simulated data
+
+```{r pupil-read-mm, results=T, message=F, warnings=F}
+## find column names in the raw data
+raw_data_cols <- read_csv("data/sim/sim_pupil_data.csv", 
+                          n_max = 0) %>%
+  colnames()
+
+## find columns to include
+## these columns are specified in the below function
+already_specified <- c("time", "pupil", "subject", "trial") 
+## these columns are not specified in the below function but I want to keep them
+cols_to_include <- setdiff(raw_data_cols, already_specified)
+
+## read in the raw data
+sim_pupil_data <- pupil_read(
+  file = here("data", "sim", "sim_pupil_data.csv"),
+  eyetracker = "",
+  time = "time",
+  pupil.mm = "pupil",
+  subject = "subject",
+  trial = "trial",
+  delim = ",",
+  message_event = "message",  ## event info stored in this column
+  include_col = cols_to_include
+)
+head(sim_pupil_data)
+```
+
+This gives a warning about parsing issues, but the column types seem correct to me.
+So I think this can be safely ignored.
+I leave the warning in just for folks who might use other datasets where it could be helpful.
+
+# 3. preprocess #
+
+## notes on setting parameters ##
+
+These parameters should make sense to most people somewhat familiar with pupil preprocessing.
+For more information on the options available in the package, see the example workflow and the individual functions.
+https://dr-jt.github.io/pupillometry/articles/preprocess_overview.html
+
+The chosen options below are just default or arbitrary to test the pipeline.
+
+### One thing regarding baseline correction ###
+
+You can see that I set the baseline duration to 1000ms.
+This is just arbitrary for this simulated data since I made each trial consist of 1000ms of "fixation" followed by 1000ms of a "target".
+But for real data, you might have a 5000ms baseline but only use the 500ms before the target to baseline correct to. 
+In this case, it is good to know that the baseline correction function and subsequent plots turn all baseline values to NA (i.e, all 5000ms of baseline).
+I found this initially a little confusing because I thought the baseline correction function was using the entire 5000ms rather than the 500ms that I specified. 
+But I think it is working correctly, it is just the plots may initially look misleading. 
+
+## set parameters ## 
+
+```{r params-mm}
+custom_params <- list(
+  deblink = list(extend = 75),
+  artifact = list(n = 8),
+  missing = list(missing_allowed = .90),
+  upsample = list(),
+  smooth = list(type = "hann", n = 50),
+  interpolate = list(type = "cubic-spline", maxgap = 1000, hz = 1000),
+  baseline = list(bc_onset_message = "target", baseline_duration = 1000, 
+                  type = "subtractive")
+)
+```
+
+## notes on running the preprocesing script ##
+
+The default approach in the pupillometry package is to run preprocessing on a trial-wise basis, so one trial at a time or on list of trials.
+I wanted to wrap this process into a function that can run preprocessing steps across trials from all participants and plot the data as we go.
+That way, we could identify all trial numbers of participants and take a look in a quicker and easier fashion (at least that was the idea). 
+
+So, I created a preprocess_and_visualize() function.
+It has a bunch of arguments, which are described in the next chunk.
+
+```{r notes-preprocess, eval=F}
+preprocess_and_visualize(
+ ## 1. a name of the pupil data file e.g.,
+ pupil_data = pupil_data,
+ ## 2. directory names (which the function creates if they don't exist)
+ plot_dir = here("plots", "preprocessing"),
+ output_dir = here("data", "preprocessing"),
+ ## 3. a list of parameter values
+ params = list(
+   deblink = list(extend = 75),
+   artifact = list(n = 8),
+   missing = list(missing_allowed = .90),
+   upsample = list(),
+   smooth = list(type = "hann", n = 50),
+   interpolate = list(type = "cubic-spline", 
+                      maxgap = 500, hz = 1000),
+   baseline = list(bc_onset_message = "target",
+                   baseline_duration = 150, 
+                   type = "subtractive")
+ ),
+ ## 4. whether to save intermediate data and plots. 
+ ## Note - if the save the intermediate data, it really slows things down.
+ save_intermediate_data = TRUE,
+ save_individual_plots = FALSE,
+ ## 5. whether to return all preprocesing steps or just the final data
+ return_all_steps = TRUE,
+ ## 6. bin length when creating binned/downsampled data (20ms or 100ms or whatever)
+ bin_length = 20,
+ ## 7. whether to smooth then interpolate or the reverse. FALSE would be the reverse.
+ smooth_then_interp = TRUE,
+ ## 8. whether the units were mm or arbitrary units (a.u. / px)
+ units = "mm" ## set to "px" for a.u.
+)
+```
+
+## run preprocessing ## 
+
+```{r preprocess-mm, eval=F}
+results <- preprocess_and_visualize(
+  pupil_data = sim_pupil_data,
+  plot_dir = here("figures", "preprocessing", "one_eye", "sim"),
+  output_dir = here("data", "preprocessing", "one_eye", "sim"),
+  params = custom_params,
+  save_intermediate_data = FALSE,
+  save_individual_plots = FALSE,
+  return_all_steps = TRUE,
+  bin_length = 200,
+  smooth_then_interp = TRUE,
+  units = "mm"
+)
+```
+
+## preprocessing output ##
+
+By default, the preprocessing script produces a bunch of figures and data, as follows:
+
+In the plot directory, it produces:
+
+- a subdirectory per participant
+- a plot per trial, which summarises the preprocesing steps with one panel per processing step.
+
+An example of subject 1, trial 3 is shown below.
+
+```{r plot-preprocess-mm, echo=F, fig.cap = "example preprocessing summary plot for one eye and 1 trial"}
+knitr::include_graphics("figures/preprocessing/one_eye/sim/S1/S1_T3_all_steps.png")
+```
+
+In the data directory, it produces:
+
+- a processed data file for each subject and a combined file for all subjects
+- a binned data file for each subject and a combined file for all subjects
+
+# 4. parameter tests #
+
+## notes on running parameter tests ##
+
+I wanted to be able to quickly take a look at the impact on preprocessing the data if I selected different parameter settings.
+
+So, I created a test_parameter_combinations() function.
+It has a bunch of arguments, which are described in the next chunk.
+
+```{r notes-test-params, eval=F}
+test_parameter_combinations(
+  ## 1. a preprocessed data file with all of the steps
+  step_data = results,
+  ## 2. a list of parameter settings, values and combinations
+  param_combinations = smooth_combinations,
+  ## 3. the processing function
+  processing_function = "pupil_smooth",
+  ## 4. which data or step in the preprocessing to use (i.e., the one before the process to test)
+  input_step = "upsample_data",
+  ## 5. directory names (which the function creates if they don't exist)
+  plot_dir = here("plots", "parameter_tests"),
+  output_dir = here("data", "parameter_tests"),
+  ## 6. whether to save the param data 
+  save_param_data = TRUE
+  ) 
+```
+
+## parameter tests on smoothing  ##
+
+```{r param-tests-smooth, eval=F}
+smooth_combinations <- list(
+  list(type = "hann", n = 10),
+  list(type = "hann", n = 50),
+  list(type = "hann", n = 100),
+  list(type = "hann", n = 200)
+)
+
+smooth_param_test <- test_parameter_combinations(
+  step_data = results,
+  param_combinations = smooth_combinations,
+  processing_function = "pupil_smooth",
+  input_step = "upsample_data",
+  plot_dir = here("figures", "parameter_tests", "one_eye", "sim", "smooth"),
+  output_dir = here("data", "parameter_tests", "one_eye", "sim", "smooth"),
+  save_param_data = FALSE
+)
+```
+
+## parameter tests on interpolation ##
+
+```{r param-tests-interp, eval=F}
+interp_combinations <- list(
+  list(maxgap = 250),
+  list(maxgap = 500),
+  list(maxgap = 750),
+  list(maxgap = 1000)
+)
+
+interp_param_test <- test_parameter_combinations(
+  step_data = results,
+  param_combinations = interp_combinations,
+  processing_function = "pupil_interpolate",
+  input_step = "smooth_data",
+  plot_dir = here("figures", "parameter_tests", "one_eye", "sim", "interp"),
+  output_dir = here("data", "parameter_tests", "one_eye", "sim", "interp"),
+  save_param_data = FALSE
+)
+```
+
+## parameter test output ##
+
+An example of subject 1, trial 3 is shown below.
+
+```{r plot-param-test, echo=F, fig.cap = "example parameter tests plot for one eye and 1 trial", out.width="90%"}
+knitr::include_graphics("figures/parameter_tests/one_eye/sim/interp/S1/S1_T3_pupil_interpolate_params.png")
+```
+
+# 5. An example with real pupil data (rather than simulated data) #
+
+This is just to provide another example of the preprocessing workflow, but this time with real data (rather than simulated data) and pupil size measured in arbitrary units rather than mm.
+
+## read in and plot the data ##
+
+This data comes from the gazer package, which is another fantastic R package for pupil preprocessing, see the package and associated paper below:
+
+https://github.com/dmirman/gazer
+
+https://link.springer.com/article/10.3758/s13428-020-01374-8
+
+```{r load-gazer-data}
+gazer_path <- system.file("extdata", "pupil_sample_files_edf.xls", package = "gazer")
+gazer_files <-fread(gazer_path)
+gazer_files <- as_tibble(gazer_files)
+# head(gazer_files)
+# summary(gazer_files)
+# glimpse(gazer_files)
+```
+
+rename and wrangle it a bit and filter to make a shorter df
+
+```{r wrangle-gazer}
+gazer_data <- gazer_files %>% 
+  # select(subject, trial, time, pupil) %>%
+  filter(trial < 4,
+         time < 2000) %>% 
+  mutate(subject = parse_number(subject))
+head(gazer_data)
+# glimpse(gazer_data)
+# summary(gazer_data)
+
+## 3pid*3trials*(2s*250hz)
+## 3*3*500
+## 4500 which is bang on
+```
+
+plot
+
+```{r plot-gazer, warning=F}
+p5.1 <- ggplot(gazer_data, aes(x= time, y= pupil)) + 
+  geom_point() + 
+  geom_line(colour="black") + 
+  ggtitle("raw pupil signal (arbitrary units)") +
+  facet_grid(subject~trial)
+p5.1
+```
+
+write out a file
+
+```{r write-gazer}
+write_csv(gazer_data, "data/gazer/gazer_data.csv")
+```
+
+## pupil_read() the gazer data ##
+
+```{r pupil-read-gazer, results=T, message=F, warning=F}
+## find column names in the raw data
+gazer_data_cols <- read_csv("data/gazer/gazer_data.csv", 
+                          n_max = 0) %>%
+  colnames()
+
+## find columns to include
+## these columns are specified in the below function
+already_specified <- c("time", "pupil", "subject", "trial") 
+## these columns are not specified in the below function but I want to keep them
+cols_to_include <- setdiff(gazer_data_cols, already_specified)
+
+## read in the raw data
+gazer_pupil_data <- pupil_read(
+  file = here("data", "gazer", "gazer_data.csv"),
+  eyetracker = "",
+  time = "time",
+  pupil.px = "pupil",
+  subject = "subject",
+  trial = "trial",
+  delim = ",",
+  message_event = "message",  ## event info stored in this column
+  include_col = cols_to_include
+)
+head(gazer_pupil_data)
+```
+
+## set parameters ## 
+
+```{r params-gazer}
+custom_params <- list(
+  deblink = list(extend = 75),
+  artifact = list(n = 8),
+  missing = list(missing_allowed = .90),
+  upsample = list(),
+  smooth = list(type = "hann", n = 50),
+  interpolate = list(type = "cubic-spline", maxgap = 500, hz = 1000),
+  baseline = list(bc_onset_message = "target", baseline_duration = 100, 
+                  type = "subtractive")
+)
+```
+
+## run preprocessing ## 
+
+```{r preprocess-gazer, eval=F}
+results_au <- preprocess_and_visualize(
+  pupil_data = gazer_pupil_data,
+  plot_dir = here("figures", "preprocessing", "one_eye", "real"),
+  output_dir = here("data", "preprocessing", "one_eye", "real"),
+  params = custom_params,
+  save_intermediate_data = FALSE,
+  save_individual_plots = FALSE,
+  return_all_steps = TRUE,
+  bin_length = 200,
+  smooth_then_interp = TRUE,
+  units = "px"
+)
+```
+
+## preprocessing output ##
+
+```{r plot-preprocess-px, echo=F, fig.cap = "example preprocessing summary plot for one eye and 1 trial for real pupil data in arbitrary units"}
+knitr::include_graphics("figures/preprocessing/one_eye/real/S11/S11_T2_all_steps.png")
+```
