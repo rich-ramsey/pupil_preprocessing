@@ -1,12 +1,16 @@
-This projects takes pupillometry data (pupil size timeseries data) and creates a preprocessing pipeline in R using the pupillometry package.
+This projects takes pupillometry data (pupil size timeseries data) and creates an example preprocessing pipeline in R using the [pupillometry package](https://dr-jt.github.io/pupillometry/index.html).
 
 # Aims and context #
 
+This project aims to setup and test a preprocessing pipeline in R, which uses the pupillometry package and approximately follows the functions written in MATLAB by Kiret & Sjak-Shie (2019).
+
 The basic preprocessing steps and principles stem from these papers and resources:
+
 [Kiret & Sjak-Shie (2019)](https://link.springer.com/article/10.3758/s13428-018-1075-y)
+
 [Geller et al., (2020)](https://link.springer.com/article/10.3758/s13428-020-01374-8)
 
-This project aims to setup and test a preprocessing pipeline in R, which uses the pupillometry package and approximately follows the functions written in MATLAB by Kiret & Sjak-Shie (2019).
+[pupillometry package](https://dr-jt.github.io/pupillometry/index.html)
 
 # Why bother? #
 
@@ -31,6 +35,7 @@ The main pupil preprocessing functions in this project all come from the fantast
 Many thanks to Jason Tsukahara for developing the package and for responding to my questions over email.
 The main additions I made to the pupillometry package's default workflow was to wrap some the of the processing functions around trials and participants, so that an entire dataset can be processed at once.
 I also added a way to vary parameter settings and visualise how it impacts preprocessing. 
+
 Before looking at my workflow and this project, I would definitely recommend looking at the very nice processing template that comes with the pupillometry package, as it gives a helpful overview of some of the key functions and the general workflow:
 [preprocessing template](https://dr-jt.github.io/pupillometry/articles/preprocess_overview.html)
 
