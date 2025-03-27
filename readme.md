@@ -65,7 +65,7 @@ See this link for the difference between cloning and forking. https://github.com
 
 ## R project file ##
 
-All files and folders are based within an R project called 'pupil_preprocessing_example.Rproj'
+All files and folders are based within an R project called 'preprocessing_example.Rproj'
 
 ## There are four main R markdown files: ##
 
@@ -96,6 +96,19 @@ This file simulates pupil size data for one eye and then for both eyes.
 **2. /data/**
 
 **3. /custom_functions/**
+
+# What's the best way to get started using the code? #
+
+You have a few entry points.
+
+1) You can ignore how the pupil data were simulated and go straight to the preprocessing files. 
+This is fine to do, as the data are not interesting. They just serve to test the pipeline.
+To so so, head straight to the preprocess files. 
+
+2) You can take a look at the data simulation code before the preprocessing code.
+To do so, start with the simulate_pupil_data.Rmd file before the preprocess file.
+
+3) For (1) and (2), you can just read the .html versions rather than the code, if that's preferable to get a sense of what is going on.
 
 
 # Acknowledgments #
