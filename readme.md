@@ -1,4 +1,4 @@
-This projects takes pupillometry data (pupil size timeseries data) and creates an example preprocessing pipeline in R using the [pupillometry package](https://dr-jt.github.io/pupillometry/index.html).
+This project takes pupillometry data (pupil size timeseries data) and creates an example preprocessing pipeline in R using the [pupillometry package](https://dr-jt.github.io/pupillometry/index.html).
 
 # Aims and context #
 
