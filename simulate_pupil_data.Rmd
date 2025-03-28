@@ -50,7 +50,7 @@ message(paste("Available cores:", detectCores()))
 
 ```{r sim-pupil-data}
 sim_pupil_data <- generate_pupil_data(n_participants = 3, n_trials = 3, hz = 60,
-                                      eye = "left", trial_length = 120)
+                                      eye = "left", trial_length = 120, seed = 123)
 head(sim_pupil_data)
 # glimpse(sim_pupil_data)
 ```
@@ -118,9 +118,10 @@ write_csv(sim_pupil_data, "data/sim/sim_pupil_data.csv")
 sim_pupil_data_both <- generate_pupil_data(
   n_participants = 3,
   n_trials = 3, 
-  eye = "both",      # Simulate both eyes
-  hz = 60,           # Sampling rate
-  trial_length = 120 # Each trial is 120 samples (2 seconds at 60Hz)
+  eye = "both",       # Simulate both eyes
+  hz = 60,            # Sampling rate
+  trial_length = 120, # Each trial is 120 samples (2 seconds at 60Hz)
+  seed = 123          # make it reproducible         
 )
 head(sim_pupil_data_both)
 ```

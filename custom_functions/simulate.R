@@ -319,8 +319,12 @@ generate_trial_data <- function(n_samples, participant_id, trial_id, eye = "both
 ## 2. Function to generate data for multiple participants and trials
 generate_pupil_data <- function(n_participants = 3, n_trials = 3, eye = "both", hz = 60, 
                                 trial_length = NULL, min_length = 100, max_length = 300,
-                                x_center = 0.5, y_center = 0.5, position_var = 0.02) {
-  set.seed(123)  # For reproducibility
+                                x_center = 0.5, y_center = 0.5, position_var = 0.02,
+                                seed = NULL) {
+  # Set seed if provided, otherwise random generation will occur
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
   
   # Define trial lengths based on input parameters
   if (is.null(trial_length)) {
